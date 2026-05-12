@@ -1,0 +1,176 @@
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from sqlalchemy.orm import Session
+from app.database import get_db
+from app.models.user import User
+from app.models.document import Document
+from app.schemas.document import DocumentResponse
+from app.services.pdf import save_pdf, extract_text
+from app.services.dependencies import get_current_user
+import uuid
+from app.services.tts import text_to_speech
+from fastapi.responses import FileResponse
+import fitz
+from fastapi.responses import FileResponse as FastAPIFileResponse
+import os
+
+router = APIRouter(prefix="/documents", tags=["Documents"])
+
+@router.post("/upload", response_model=DocumentResponse)
+def upload_pdf(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if not file.filename.endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Seuls les fichiers PDF sont acceptés")
+
+    file_bytes = file.file.read()
+    unique_filename = f"{uuid.uuid4()}_{file.filename}"
+    file_path = save_pdf(file_bytes, unique_filename)
+    text, total_pages = extract_text(file_path)
+
+    document = Document(
+        user_id=current_user.id,
+        title=file.filename.replace(".pdf", ""),
+        filename=unique_filename,
+        file_path=file_path,
+        total_pages=total_pages
+    )
+    db.add(document)
+    db.commit()
+    db.refresh(document)
+    return document
+
+@router.get("/", response_model=list[DocumentResponse])
+def get_documents(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    documents = db.query(Document).filter(Document.user_id == current_user.id).all()
+    return documents
+@router.get("/{document_id}/file")
+def get_pdf_file(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    document = db.query(Document).filter(
+        Document.id == document_id,
+        Document.user_id == current_user.id
+    ).first()
+
+    if not document:
+        raise HTTPException(status_code=404, detail="Document introuvable")
+
+    return FastAPIFileResponse(
+        document.file_path,
+        media_type="application/pdf",
+        filename=document.filename
+    )
+@router.get("/{document_id}/audio")
+def get_audio(
+    document_id: int,
+    lang: str = "fr",
+    genre: str = "feminin",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    document = db.query(Document).filter(
+        Document.id == document_id,
+        Document.user_id == current_user.id
+    ).first()
+
+    if not document:
+        raise HTTPException(status_code=404, detail="Document introuvable")
+
+    doc = fitz.open(document.file_path)
+    full_text = ""
+    for page in doc:
+        full_text += page.get_text()
+    doc.close()
+
+    if not full_text.strip():
+        raise HTTPException(status_code=400, detail="Aucun texte extractible dans ce PDF")
+
+    audio_path = text_to_speech(full_text[:3000], document_id, lang=lang, genre=genre)
+    return FileResponse(audio_path, media_type="audio/mpeg", filename=f"document_{document_id}.mp3")
+@router.put("/{document_id}/progress")
+def update_progress(
+    document_id: int,
+    page: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    document = db.query(Document).filter(
+        Document.id == document_id,
+        Document.user_id == current_user.id
+    ).first()
+
+    if not document:
+        raise HTTPException(status_code=404, detail="Document introuvable")
+
+    document.last_page = page
+    db.commit()
+    return {"message": f"Progression sauvegardee à la page {page}"}
+@router.get("/{document_id}/progress")
+def get_progress(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    document = db.query(Document).filter(
+        Document.id == document_id,
+        Document.user_id == current_user.id
+    ).first()
+
+    if not document:
+        raise HTTPException(status_code=404, detail="Document introuvable")
+
+    return {"document_id": document_id, "last_page": document.last_page}
+@router.get("/{document_id}/text")
+def get_text(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    document = db.query(Document).filter(
+        Document.id == document_id,
+        Document.user_id == current_user.id
+    ).first()
+
+    if not document:
+        raise HTTPException(status_code=404, detail="Document introuvable")
+
+    import fitz
+    doc = fitz.open(document.file_path)
+    pages = []
+    for i, page in enumerate(doc):
+        pages.append({"page": i + 1, "text": page.get_text()})
+    doc.close()
+    return {"pages": pages}
+@router.delete("/{document_id}")
+def delete_document(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    document = db.query(Document).filter(
+        Document.id == document_id,
+        Document.user_id == current_user.id
+    ).first()
+
+    if not document:
+        raise HTTPException(status_code=404, detail="Document introuvable")
+
+    # Supprime le fichier physique du disque
+    if os.path.exists(document.file_path):
+        os.remove(document.file_path)
+
+    # Supprime aussi le fichier audio si il existe
+    audio_path = f"audio_outputs/document_{document_id}.wav"
+    if os.path.exists(audio_path):
+        os.remove(audio_path)
+
+    db.delete(document)
+    db.commit()
+    return {"message": "Document supprimé"}
