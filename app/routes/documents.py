@@ -81,18 +81,35 @@ def get_audio(
     ).first()
 
     if not document:
-        raise HTTPException(status_code=404, detail="Document introuvable")
+        raise HTTPException(status_code=404, detail="Document introuvable en BDD")
 
-    doc = fitz.open(document.file_path)
-    full_text = ""
-    for page in doc:
-        full_text += page.get_text()
-    doc.close()
+    import os
+    if not os.path.exists(document.file_path):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Fichier PDF introuvable sur le serveur: {document.file_path}"
+        )
+
+    try:
+        doc = fitz.open(document.file_path)
+        full_text = ""
+        for page in doc:
+            full_text += page.get_text()
+        doc.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur lecture PDF: {str(e)}")
 
     if not full_text.strip():
         raise HTTPException(status_code=400, detail="Aucun texte extractible dans ce PDF")
 
-    audio_path = text_to_speech(full_text, document_id, lang=lang, genre=genre)
+    try:
+        audio_path = text_to_speech(full_text, document_id, lang=lang, genre=genre)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur TTS: {str(e)}")
+
+    if not os.path.exists(audio_path):
+        raise HTTPException(status_code=500, detail="Fichier audio non généré")
+
     return FileResponse(audio_path, media_type="audio/mpeg", filename=f"document_{document_id}.mp3")
 @router.put("/{document_id}/progress")
 def update_progress(
