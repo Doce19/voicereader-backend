@@ -12,6 +12,8 @@ from fastapi.responses import FileResponse
 import fitz
 from fastapi.responses import FileResponse as FastAPIFileResponse
 import os
+import logging
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
 
@@ -75,19 +77,27 @@ def get_audio(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    import os
+    logger.info(f"Audio request for document {document_id}")
+
     document = db.query(Document).filter(
         Document.id == document_id,
         Document.user_id == current_user.id
     ).first()
 
     if not document:
+        logger.error("Document not found in DB")
         raise HTTPException(status_code=404, detail="Document introuvable en BDD")
 
-    import os
+    logger.info(f"File path: {document.file_path}")
+    logger.info(f"File exists: {os.path.exists(document.file_path)}")
+    logger.info(f"Current dir: {os.getcwd()}")
+    logger.info(f"Uploads dir exists: {os.path.exists('uploads')}")
+
     if not os.path.exists(document.file_path):
         raise HTTPException(
             status_code=404,
-            detail=f"Fichier PDF introuvable sur le serveur: {document.file_path}"
+            detail=f"Fichier PDF introuvable: {document.file_path}"
         )
 
     try:
@@ -96,19 +106,21 @@ def get_audio(
         for page in doc:
             full_text += page.get_text()
         doc.close()
+        logger.info(f"Text extracted: {len(full_text)} characters")
     except Exception as e:
+        logger.error(f"PDF read error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erreur lecture PDF: {str(e)}")
 
     if not full_text.strip():
-        raise HTTPException(status_code=400, detail="Aucun texte extractible dans ce PDF")
+        raise HTTPException(status_code=400, detail="Aucun texte extractible")
 
     try:
+        logger.info(f"Starting TTS with lang={lang} genre={genre}")
         audio_path = text_to_speech(full_text, document_id, lang=lang, genre=genre)
+        logger.info(f"Audio generated: {audio_path}")
     except Exception as e:
+        logger.error(f"TTS error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erreur TTS: {str(e)}")
-
-    if not os.path.exists(audio_path):
-        raise HTTPException(status_code=500, detail="Fichier audio non généré")
 
     return FileResponse(audio_path, media_type="audio/mpeg", filename=f"document_{document_id}.mp3")
 @router.put("/{document_id}/progress")
