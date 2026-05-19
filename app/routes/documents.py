@@ -92,7 +92,7 @@ def get_audio(
     if not full_text.strip():
         raise HTTPException(status_code=400, detail="Aucun texte extractible dans ce PDF")
 
-    audio_path = text_to_speech(full_text[:3000], document_id, lang=lang, genre=genre)
+    audio_path = text_to_speech(full_text, document_id, lang=lang, genre=genre)
     return FileResponse(audio_path, media_type="audio/mpeg", filename=f"document_{document_id}.mp3")
 @router.put("/{document_id}/progress")
 def update_progress(
@@ -162,12 +162,14 @@ def delete_document(
     if not document:
         raise HTTPException(status_code=404, detail="Document introuvable")
 
-    # Supprime le fichier physique du disque
+    # Supprime d'abord les signets liés
+    from app.models.bookmark import Bookmark
+    db.query(Bookmark).filter(Bookmark.document_id == document_id).delete()
+
     if os.path.exists(document.file_path):
         os.remove(document.file_path)
 
-    # Supprime aussi le fichier audio si il existe
-    audio_path = f"audio_outputs/document_{document_id}.wav"
+    audio_path = f"audio_outputs/document_{document_id}.mp3"
     if os.path.exists(audio_path):
         os.remove(audio_path)
 
