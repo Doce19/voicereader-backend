@@ -1,0 +1,17 @@
+venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+.env
+.git
+.gitignore
+node_modules
+dist
+build
+uploads
+audio
+*.mp3
+*.wav
+*.pdf
