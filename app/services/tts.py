@@ -1,58 +1,36 @@
 import os
 import asyncio
 import edge_tts
+from gtts import gTTS
+import logging
 
+logger = logging.getLogger(__name__)
 OUTPUT_DIR = "audio_outputs"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 VOICES = {
-    "fr": {
-        "masculin": "fr-FR-HenriNeural",
-        "feminin": "fr-FR-DeniseNeural"
-    },
-    "en": {
-        "masculin": "en-US-GuyNeural",
-        "feminin": "en-US-JennyNeural"
-    }
+    "fr": {"masculin": "fr-FR-HenriNeural", "feminin": "fr-FR-DeniseNeural"},
+    "en": {"masculin": "en-US-GuyNeural", "feminin": "en-US-JennyNeural"}
 }
 
-def split_text(text: str, chunk_size: int = 1000) -> list:
-    sentences = text.replace('\n', ' ').split('. ')
-    chunks = []
-    current = ""
-    for sentence in sentences:
-        if len(current) + len(sentence) < chunk_size:
-            current += sentence + ". "
-        else:
-            if current:
-                chunks.append(current.strip())
-            current = sentence + ". "
-    if current:
-        chunks.append(current.strip())
-    return chunks
+GTTS_LANG = {"fr": "fr", "en": "en"}
 
-async def generate_chunk(text: str, voice: str, path: str):
+async def generate_edge(text: str, voice: str, output_path: str):
     communicate = edge_tts.Communicate(text=text, voice=voice)
-    await communicate.save(path)
-
-async def generate_full_audio(text: str, voice: str, output_path: str):
-    chunks = split_text(text)
-    chunk_paths = []
-
-    for i, chunk in enumerate(chunks):
-        chunk_path = output_path.replace('.mp3', f'_chunk_{i}.mp3')
-        await generate_chunk(chunk, voice, chunk_path)
-        chunk_paths.append(chunk_path)
-
-    # Combine tous les chunks en un seul fichier
-    with open(output_path, 'wb') as outfile:
-        for chunk_path in chunk_paths:
-            with open(chunk_path, 'rb') as infile:
-                outfile.write(infile.read())
-            os.remove(chunk_path)
+    await communicate.save(output_path)
 
 def text_to_speech(text: str, document_id: int, lang: str = "fr", genre: str = "feminin") -> str:
     output_path = os.path.join(OUTPUT_DIR, f"document_{document_id}.mp3")
     voice = VOICES.get(lang, VOICES["fr"]).get(genre, "fr-FR-DeniseNeural")
-    asyncio.run(generate_full_audio(text, voice, output_path))
-    return output_path
+    
+    try:
+        asyncio.run(generate_edge(text, voice, output_path))
+        logger.info("Edge TTS success")
+        return output_path
+    except Exception as e:
+        logger.warning(f"Edge TTS failed: {e} - Falling back to gTTS")
+        gtts_lang = GTTS_LANG.get(lang, "fr")
+        tts = gTTS(text=text, lang=gtts_lang, slow=False)
+        tts.save(output_path)
+        logger.info("gTTS fallback success")
+        return output_path
