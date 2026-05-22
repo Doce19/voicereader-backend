@@ -12,8 +12,12 @@ app = FastAPI(title="VoiceReader API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=[
+        "https://voicereader-frontend.vercel.app",
+        "https://voicereader-frontend-git-main-doce19s-projects.vercel.app",
+        "http://localhost:3000",
+        "*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
