@@ -3,19 +3,29 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.user import User
 from app.models.document import Document
+from app.models.bookmark import Bookmark
 from app.schemas.document import DocumentResponse
 from app.services.pdf import save_pdf, extract_text
 from app.services.dependencies import get_current_user
-import uuid
 from app.services.tts import text_to_speech
 from fastapi.responses import FileResponse
+import uuid
 import fitz
-from fastapi.responses import FileResponse as FastAPIFileResponse
 import os
 import logging
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
+
+
+def ensure_document_file_exists(document: Document):
+    if not document.file_path or not os.path.exists(document.file_path):
+        raise HTTPException(
+            status_code=404,
+            detail="Fichier PDF introuvable. Veuillez supprimer ce document et le ré-uploader."
+        )
+
 
 @router.post("/upload", response_model=DocumentResponse)
 def upload_pdf(
@@ -23,7 +33,7 @@ def upload_pdf(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if not file.filename.endswith(".pdf"):
+    if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Seuls les fichiers PDF sont acceptés")
 
     file_bytes = file.file.read()
@@ -43,13 +53,15 @@ def upload_pdf(
     db.refresh(document)
     return document
 
+
 @router.get("/", response_model=list[DocumentResponse])
 def get_documents(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    documents = db.query(Document).filter(Document.user_id == current_user.id).all()
-    return documents
+    return db.query(Document).filter(Document.user_id == current_user.id).all()
+
+
 @router.get("/{document_id}/file")
 def get_pdf_file(
     document_id: int,
@@ -64,11 +76,15 @@ def get_pdf_file(
     if not document:
         raise HTTPException(status_code=404, detail="Document introuvable")
 
-    return FastAPIFileResponse(
+    ensure_document_file_exists(document)
+
+    return FileResponse(
         document.file_path,
         media_type="application/pdf",
         filename=document.filename
     )
+
+
 @router.get("/{document_id}/audio")
 def get_audio(
     document_id: int,
@@ -77,7 +93,6 @@ def get_audio(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    import os
     logger.info(f"Audio request for document {document_id}")
 
     document = db.query(Document).filter(
@@ -86,19 +101,9 @@ def get_audio(
     ).first()
 
     if not document:
-        logger.error("Document not found in DB")
-        raise HTTPException(status_code=404, detail="Document introuvable en BDD")
+        raise HTTPException(status_code=404, detail="Document introuvable")
 
-    logger.info(f"File path: {document.file_path}")
-    logger.info(f"File exists: {os.path.exists(document.file_path)}")
-    logger.info(f"Current dir: {os.getcwd()}")
-    logger.info(f"Uploads dir exists: {os.path.exists('uploads')}")
-
-    if not os.path.exists(document.file_path):
-        raise HTTPException(
-            status_code=404,
-            detail=f"Fichier PDF introuvable: {document.file_path}"
-        )
+    ensure_document_file_exists(document)
 
     try:
         doc = fitz.open(document.file_path)
@@ -106,7 +111,6 @@ def get_audio(
         for page in doc:
             full_text += page.get_text()
         doc.close()
-        logger.info(f"Text extracted: {len(full_text)} characters")
     except Exception as e:
         logger.error(f"PDF read error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erreur lecture PDF: {str(e)}")
@@ -115,14 +119,21 @@ def get_audio(
         raise HTTPException(status_code=400, detail="Aucun texte extractible")
 
     try:
-        logger.info(f"Starting TTS with lang={lang} genre={genre}")
         audio_path = text_to_speech(full_text, document_id, lang=lang, genre=genre)
-        logger.info(f"Audio generated: {audio_path}")
     except Exception as e:
         logger.error(f"TTS error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erreur TTS: {str(e)}")
 
-    return FileResponse(audio_path, media_type="audio/mpeg", filename=f"document_{document_id}.mp3")
+    if not os.path.exists(audio_path):
+        raise HTTPException(status_code=500, detail="Audio généré introuvable")
+
+    return FileResponse(
+        audio_path,
+        media_type="audio/mpeg",
+        filename=f"document_{document_id}.mp3"
+    )
+
+
 @router.put("/{document_id}/progress")
 def update_progress(
     document_id: int,
@@ -138,9 +149,13 @@ def update_progress(
     if not document:
         raise HTTPException(status_code=404, detail="Document introuvable")
 
+    page = max(0, min(page, document.total_pages or page))
     document.last_page = page
     db.commit()
-    return {"message": f"Progression sauvegardee à la page {page}"}
+
+    return {"message": f"Progression sauvegardée à la page {page}"}
+
+
 @router.get("/{document_id}/progress")
 def get_progress(
     document_id: int,
@@ -156,6 +171,8 @@ def get_progress(
         raise HTTPException(status_code=404, detail="Document introuvable")
 
     return {"document_id": document_id, "last_page": document.last_page}
+
+
 @router.get("/{document_id}/text")
 def get_text(
     document_id: int,
@@ -170,13 +187,19 @@ def get_text(
     if not document:
         raise HTTPException(status_code=404, detail="Document introuvable")
 
-    import fitz
-    doc = fitz.open(document.file_path)
-    pages = []
-    for i, page in enumerate(doc):
-        pages.append({"page": i + 1, "text": page.get_text()})
-    doc.close()
-    return {"pages": pages}
+    ensure_document_file_exists(document)
+
+    try:
+        doc = fitz.open(document.file_path)
+        pages = []
+        for i, page in enumerate(doc):
+            pages.append({"page": i + 1, "text": page.get_text()})
+        doc.close()
+        return {"pages": pages}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur lecture PDF: {str(e)}")
+
+
 @router.delete("/{document_id}")
 def delete_document(
     document_id: int,
@@ -191,11 +214,9 @@ def delete_document(
     if not document:
         raise HTTPException(status_code=404, detail="Document introuvable")
 
-    # Supprime d'abord les signets liés
-    from app.models.bookmark import Bookmark
-    db.query(Bookmark).filter(Bookmark.document_id == document_id).delete()
+    db.query(Bookmark).filter(Bookmark.document_id == document_id).delete(synchronize_session=False)
 
-    if os.path.exists(document.file_path):
+    if document.file_path and os.path.exists(document.file_path):
         os.remove(document.file_path)
 
     audio_path = f"audio_outputs/document_{document_id}.mp3"
@@ -204,4 +225,5 @@ def delete_document(
 
     db.delete(document)
     db.commit()
+
     return {"message": "Document supprimé"}
