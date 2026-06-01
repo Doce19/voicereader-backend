@@ -17,6 +17,10 @@ class ForgotPassword(BaseModel):
     email: EmailStr
     new_password: str
 
+class UserUpdate(BaseModel):
+    email: EmailStr
+    username: str
+
 class UserResponse(BaseModel):
     id: int
     email: str

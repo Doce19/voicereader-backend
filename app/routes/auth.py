@@ -12,6 +12,7 @@ from app.schemas.user import (
     Token,
     ChangePassword,
     ForgotPassword,
+    UserUpdate,
 )
 from app.services.auth import hash_password, verify_password, create_access_token
 from app.services.dependencies import get_current_user
@@ -69,6 +70,46 @@ def change_password(
     db.commit()
 
     return {"message": "Mot de passe modifié avec succès"}
+
+@router.get("/me", response_model=UserResponse)
+def get_me(current_user: User = Depends(get_current_user)):
+    return current_user
+
+
+@router.put("/me", response_model=UserResponse)
+def update_me(
+    data: UserUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    email_exists = db.query(User).filter(
+        User.email == data.email,
+        User.id != current_user.id
+    ).first()
+
+    if email_exists:
+        raise HTTPException(status_code=400, detail="Email déjà utilisé")
+
+    username_exists = db.query(User).filter(
+        User.username == data.username,
+        User.id != current_user.id
+    ).first()
+
+    if username_exists:
+        raise HTTPException(status_code=400, detail="Nom d'utilisateur déjà utilisé")
+
+    user = db.query(User).filter(User.id == current_user.id).first()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+
+    user.email = data.email
+    user.username = data.username
+
+    db.commit()
+    db.refresh(user)
+
+    return user
 
 @router.delete("/me")
 def delete_account(
