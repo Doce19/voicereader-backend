@@ -1,9 +1,20 @@
+import os
+from app.models.document import Document
+from app.models.bookmark import Bookmark
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.user import User
-from app.schemas.user import UserRegister, UserLogin, UserResponse, Token
+from app.schemas.user import (
+    UserRegister,
+    UserLogin,
+    UserResponse,
+    Token,
+    ChangePassword,
+    ForgotPassword,
+)
 from app.services.auth import hash_password, verify_password, create_access_token
+from app.services.dependencies import get_current_user
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -31,3 +42,62 @@ def login(user_data: UserLogin, db: Session = Depends(get_db)):
 
     token = create_access_token(data={"sub": str(user.id)})
     return {"access_token": token, "token_type": "bearer"}
+
+@router.post("/forgot-password")
+def forgot_password(data: ForgotPassword, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == data.email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Aucun compte trouvé avec cet email")
+
+    user.hashed_password = hash_password(data.new_password)
+    db.commit()
+
+    return {"message": "Mot de passe réinitialisé avec succès"}
+
+@router.post("/change-password")
+def change_password(
+    data: ChangePassword,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    user = db.query(User).filter(User.id == current_user.id).first()
+
+    if not verify_password(data.old_password, user.hashed_password):
+        raise HTTPException(status_code=400, detail="Ancien mot de passe incorrect")
+
+    user.hashed_password = hash_password(data.new_password)
+    db.commit()
+
+    return {"message": "Mot de passe modifié avec succès"}
+
+@router.delete("/me")
+def delete_account(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    user = db.query(User).filter(User.id == current_user.id).first()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+
+    documents = db.query(Document).filter(Document.user_id == user.id).all()
+
+    for document in documents:
+        if document.file_path and os.path.exists(document.file_path):
+            try:
+                os.remove(document.file_path)
+            except OSError:
+                pass
+
+    db.query(Bookmark).filter(Bookmark.user_id == user.id).delete(synchronize_session=False)
+
+    document_ids = [document.id for document in documents]
+    if document_ids:
+        db.query(Bookmark).filter(Bookmark.document_id.in_(document_ids)).delete(synchronize_session=False)
+
+    db.query(Document).filter(Document.user_id == user.id).delete(synchronize_session=False)
+
+    db.delete(user)
+    db.commit()
+
+    return {"message": "Compte supprimé avec succès"}
