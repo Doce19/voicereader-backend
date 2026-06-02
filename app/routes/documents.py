@@ -7,7 +7,7 @@ from app.models.bookmark import Bookmark
 from app.schemas.document import DocumentResponse
 from app.services.pdf import save_pdf, extract_text
 from app.services.dependencies import get_current_user
-from app.services.tts import text_to_speech
+from app.services.tts import text_to_speech_edge
 from fastapi.responses import FileResponse
 import uuid
 import fitz
@@ -91,7 +91,7 @@ def get_pdf_file(
     )
 
 @router.get("/{document_id}/audio")
-def get_audio(
+async def get_audio(
     document_id: int,
     lang: str = "fr",
     genre: str = "feminin",
@@ -124,7 +124,7 @@ def get_audio(
         raise HTTPException(status_code=400, detail="Aucun texte extractible")
 
     try:
-        audio_path = text_to_speech(full_text, document_id, lang=lang, genre=genre)
+        audio_path, _ = await text_to_speech_edge(full_text, document_id, lang=lang, genre=genre)
     except Exception as e:
         logger.error(f"TTS error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erreur TTS: {str(e)}")
@@ -138,6 +138,26 @@ def get_audio(
         filename=f"document_{document_id}.mp3"
     )
 
+@router.get("/{document_id}/timestamps")
+def get_timestamps(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    document = db.query(Document).filter(
+        Document.id == document_id,
+        Document.user_id == current_user.id
+    ).first()
+
+    if not document:
+        raise HTTPException(status_code=404, detail="Document introuvable")
+
+    json_path = f"audio_outputs/document_{document_id}.json"
+
+    if not os.path.exists(json_path):
+        raise HTTPException(status_code=404, detail="Timestamps non générés. Veuillez d'abord générer l'audio.")
+
+    return FileResponse(json_path, media_type="application/json")
 
 @router.put("/{document_id}/progress")
 def update_progress(
