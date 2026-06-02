@@ -78,12 +78,17 @@ def get_pdf_file(
 
     ensure_document_file_exists(document)
 
+    # Headers indispensables pour que le navigateur accepte de le lire en Cross-Origin
+    headers = {
+        "Content-Disposition": f'inline; filename="{document.filename}"',
+        "Accept-Ranges": "bytes"
+    }
+
     return FileResponse(
         document.file_path,
         media_type="application/pdf",
-        filename=document.filename
+        headers=headers
     )
-
 
 @router.get("/{document_id}/audio")
 def get_audio(
