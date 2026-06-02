@@ -47,12 +47,12 @@ async def text_to_speech_edge(text: str, document_id: int, lang: str = "fr", gen
                 if chunk["type"] == "audio":
                     fp.write(chunk["data"])
                 elif chunk["type"] == "WordBoundary":
-                    # submaker enregistre la position exacte (début, fin, texte) de chaque mot
+                    # submaker enregistre la position exacte de chaque mot
                     submaker.feed(chunk)
 
-        # Structure et sauvegarde des timestamps au format JSON
+        # CORRECTION ICI : Extraction propre des sous-titres/timestamps depuis les indices internes de SubMaker
         timestamps = []
-        for start, end, word in submaker.offset_data:
+        for start, end, word in submaker.cues:
             timestamps.append({
                 "word": word,
                 "start": start.total_seconds(),
