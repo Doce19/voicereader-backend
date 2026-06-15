@@ -8,25 +8,28 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.dirname(__file__)),
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+# Nettoyage strict et forçage des arguments SSL
+if DATABASE_URL:
+    # Correction de l'ancien préfixe de Render
+    if DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+    
+    # Suppression des paramètres existants s'ils gèrent mal le SSL
+    if "?" in DATABASE_URL:
+        DATABASE_URL = DATABASE_URL.split("?")[0]
 
-
-connect_args = {}
-if DATABASE_URL and "localhost" not in DATABASE_URL and "127.0.0.1" not in DATABASE_URL:
-    connect_args={"sslmode": "require"}
-
+# Création de l'engine avec les arguments de connexion natifs de psycopg2
 engine = create_engine(
     DATABASE_URL,
-    connect_args=connect_args, 
-    pool_pre_ping=True,     # Teste la connexion avant usage → évite les connexions mortes
-    pool_recycle=300,        # Recycle les connexions toutes les 5 min
-    pool_size=5,             # Nombre de connexions maintenues en pool
-    max_overflow=10,         # Connexions supplémentaires autorisées si pool plein
+    connect_args={
+        "sslmode": "require",
+        "target_session_attrs": "read-write"
+    },
+    pool_pre_ping=True,
+    pool_recycle=300
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
 Base = declarative_base()
 
 def get_db():
