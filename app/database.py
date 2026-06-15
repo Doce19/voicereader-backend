@@ -8,8 +8,17 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.dirname(__file__)),
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+
+connect_args = {}
+if DATABASE_URL and "localhost" not in DATABASE_URL and "127.0.0.1" not in DATABASE_URL:
+    connect_args={"sslmode": "require"}
+
 engine = create_engine(
     DATABASE_URL,
+    connect_args=connect_args, 
     pool_pre_ping=True,     # Teste la connexion avant usage → évite les connexions mortes
     pool_recycle=300,        # Recycle les connexions toutes les 5 min
     pool_size=5,             # Nombre de connexions maintenues en pool
