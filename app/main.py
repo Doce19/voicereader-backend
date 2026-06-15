@@ -3,28 +3,34 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine, Base
 from fastapi.openapi.utils import get_openapi
 from app.models import User, Document, Bookmark
-from app.routes import auth
 from app.routes import auth, documents, bookmarks
 
-Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="VoiceReader API", version="1.0.0")
 
+
+origins = [
+    "https://voicereader-frontend.vercel.app",
+    "https://voicereader-frontend-git-main-doce19s-projects.vercel.app",
+    "http://localhost:3000"
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://voicereader-frontend.vercel.app",
-        "https://voicereader-frontend-git-main-doce19s-projects.vercel.app",
-        "http://localhost:3000",
-        "*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+
+Base.metadata.create_all(bind=engine)
+
+
 app.include_router(auth.router)
 app.include_router(documents.router)
 app.include_router(bookmarks.router)
+
 
 def custom_openapi():
     if app.openapi_schema:
@@ -35,7 +41,8 @@ def custom_openapi():
         routes=app.routes,
     )
     openapi_schema["components"]["securitySchemes"] = {
-        "BearerAuth": {
+        
+        "bearerAuth": {
             "type": "http",
             "scheme": "bearer",
             "bearerFormat": "JWT",
@@ -43,7 +50,7 @@ def custom_openapi():
     }
     for path in openapi_schema["paths"].values():
         for method in path.values():
-            method["security"] = [{"BearerAuth": []}]
+            method["security"] = [{"bearerAuth": []}]
     app.openapi_schema = openapi_schema
     return app.openapi_schema
 
