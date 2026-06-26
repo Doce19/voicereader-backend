@@ -11,7 +11,7 @@ app = FastAPI(title="VoiceReader API", version="1.0.0")
 
 origins = [
     "https://voicereader-frontend.vercel.app",
-    "https://voicereader-frontend-git-main-doce19s-projects.vercel.app",
+    "https://voice-reader.iwajutech.com",
     "http://localhost:3000"
 ]
 
