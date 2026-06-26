@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine, Base
 from fastapi.openapi.utils import get_openapi
 from app.models import User, Document, Bookmark
-from app.routes import auth, documents, bookmarks
+from app.routes import auth, documents, bookmarks, billing
 
 
 app = FastAPI(title="VoiceReader API", version="1.0.0")
@@ -30,6 +30,7 @@ Base.metadata.create_all(bind=engine)
 app.include_router(auth.router)
 app.include_router(documents.router)
 app.include_router(bookmarks.router)
+app.include_router(billing.router)
 
 
 def custom_openapi():

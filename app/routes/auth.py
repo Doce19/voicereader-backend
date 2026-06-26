@@ -75,7 +75,6 @@ def change_password(
 def get_me(current_user: User = Depends(get_current_user)):
     return current_user
 
-
 @router.put("/me", response_model=UserResponse)
 def update_me(
     data: UserUpdate,
