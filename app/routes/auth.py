@@ -25,6 +25,10 @@ def register(user_data: UserRegister, db: Session = Depends(get_db)):
     if existing_user:
         raise HTTPException(status_code=400, detail="Email déjà utilisé")
 
+    existing_username = db.query(User).filter(User.username == user_data.username).first()
+    if existing_username:
+        raise HTTPException(status_code=400, detail="Nom d'utilisateur déjà utilisé")
+
     new_user = User(
         email=user_data.email,
         username=user_data.username,
